@@ -1,2 +1,3 @@
 # cl-hanabi
-Experimental version of the Hanabi programming language
+
+This is the experimental version of the Hanabi programming language, written in Common Lisp.
