@@ -54,11 +54,14 @@
 (defun hanabi-reader (stream sub-char numarg)
   (declare (ignore sub-char numarg))
   ;; Order matters. Readers higher in the list will be called first.
-  (let ((readers '(hanabi-end-reader))
-		(hstring (make-array 0
-							 :element-type 'character
-							 :fill-pointer 0
-							 :adjustable t))  ; This is the "string" that the stream is stored in.
+  (let ((readers '(hanabi-quote-reader
+		   hanabi-string-reader
+		   hanabi-integer-reader
+		   hanabi-symbol-reader))
+	(hstring (make-array 0
+			     :element-type 'character
+			     :fill-pointer 0
+			     :adjustable t))  ; This is the "string" that the stream is stored in.
 		(hpos 0)  ; This is the hstring index.
 		(hlength 0)  ; This is the farthest we have consumed so far.
 		)
@@ -73,6 +76,13 @@
 					(if (and (< new-pos hlength) (>= new-pos 0))
 						(setf hpos new-pos)
 						(error "hstream→:restore: Position out of range"))))
+				 (:peek
+				  (let (char)
+					(if (< hpos hlength)
+					        (setf char (elt hstring hpos))
+						(progn
+						  (setf char (peek-char nil stream nil 'eof))))
+					char))
 				 (:next
 				  (let (char)
 					(if (< hpos hlength)
@@ -81,7 +91,6 @@
 						  (incf hpos))
 						(progn
 						  (setf char (read-char stream nil 'eof))
-						  (print char)
 						  (unless (eq char 'eof)
 							(vector-push-extend char hstring)
 							(incf hlength)
@@ -99,10 +108,10 @@
 					 (pop readers)
 					 (hstream :restore position))
 					(if readers
-						(reader-status-ast ret)
+						ret
 						nil)))
 				 (otherwise (error "hstream: Key absent or unrecognized")))))
-	  (hstream :try-readers readers))))
+	  (reader-status-ast (hstream :try-readers readers)))))
 
 ;; (defun gotoend-reader (hstring)
 ;;   (l
@@ -116,12 +125,82 @@
 
 (defun hanabi-end-reader (hstream)
   (make-reader-status :ast nil
-					  :success (let (char)
-								 (l
-								  (setf char (funcall hstream :next))
-								  while (characterp char)
-								  until (char= char #\%))
-								 t)))
+		      :success (let (char)
+				 (l
+				  (setf char (funcall hstream :next))
+				  while (characterp char)
+				  until (char= char #\%))
+				 t)))
+
+(defun hanabi-string-reader (hstream)
+  (let (char
+	success
+	(string (make-array 0
+			    :element-type 'character
+			    :fill-pointer 0
+			    :adjustable t)))
+    (setf char (funcall hstream :next))
+    (if (and (characterp char) (eq char #\"))
+	(progn
+	  (l
+	   (setf char (funcall hstream :next))
+	   while (and (characterp char) (not (eq char #\")))
+	   (vector-push-extend char string))
+	  (setf success (if (characterp char)
+			    t
+			    nil)))
+	(setf success nil))
+    (make-reader-status :ast (coerce string 'string)
+			:success success)))
+(defun hanabi-integer-reader (hstream)
+  (let (char
+	success
+	(integer 0)
+	found-digit)
+    (l
+     (setf char (funcall hstream :peek))
+     while (and (characterp char) (digit-char-p char))
+     (funcall hstream :next)
+     (setf found-digit t)
+     (setf integer (+ (* 10 integer) (digit-char-p char))))
+    (setf success found-digit)
+    (make-reader-status :ast integer
+			:success success)))
+
+(defun hanabi-symbol-reader (hstream)
+  (let (char
+	success
+	(string (make-array 0
+			    :element-type 'character
+			    :fill-pointer 0
+			    :adjustable t))
+	found-char)
+    (l
+     (setf char (funcall hstream :peek))
+     while (and (characterp char)
+		(not (char= char #\ ))
+		(not (char= char #\))))
+     (funcall hstream :next)
+     (setf found-char t)
+     (vector-push-extend char string))
+    (setf success found-char)
+    (make-reader-status :ast (read-from-string (coerce string 'string))
+			:success success)))
+(defun hanabi-quote-reader (hstream)
+  (let (char
+	success
+	ast
+	ret)
+    (setf char (funcall hstream :next))
+    (when (char= char #\')
+	(setf ret (funcall hstream :try-readers '(hanabi-quote-reader
+					  hanabi-string-reader
+					  hanabi-integer-reader
+					  hanabi-symbol-reader)))
+	(setf success (reader-status-success ret))
+	(setf ast `(quote ,(reader-status-ast ret))))
+    (make-reader-status :ast ast
+			:success success)))
 
 ;; (def-hanabi-reader hanabi-integer-reader (stream)
 ;;   (let ((int 0))
