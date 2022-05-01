@@ -45,6 +45,9 @@
 (defun whitespacep (char)
   (member char '(#\  #\Tab #\Return #\Newline)))
 
+(defun lassoc (item lalist)
+  (cadr (assoc item lalist)))
+
 
 ;;; Hanabi top-level reader ;;;
 
@@ -59,9 +62,13 @@
 									hanabi-quote-reader
 									hanabi-string-reader
 									hanabi-integer-reader
+									hanabi-forth-reader
 									hanabi-symbol-reader))
 
 (defvar hanabi-whitespace-readers '(hanabi-whitespace-reader))
+
+(defvar hanabi-function-info '((print 1)
+							   (+     2)))
 
 ;; This is the Common Lisp reader macro for Hanabi. Other reader readers will be used by it.
 ;; TODO: Macro should only return after a single form has been read.
@@ -133,16 +140,60 @@
 		ret
 		ast)
 	(setf char (funcall hstream :next))
-	(when (and (characterp char) (char= char #\())
-	  (funcall hstream :try-readers hanabi-whitespace-readers)
+	(when (characterp char)
+	  (case char
+		;; The lisp way
+		(#\(
+		 (funcall hstream :try-readers hanabi-whitespace-readers)
+		 (l
+		  (setf ret (funcall hstream :try-readers hanabi-expression-readers))
+		  (push (reader-status-ast ret) ast)
+		  while (reader-status-success ret)
+		  (setf ret (funcall hstream :try-readers hanabi-whitespace-readers))
+		  while (reader-status-success ret))
+		 (setf char (funcall hstream :next))
+		 (when (and (characterp char) (char= char #\)))
+		   (setf success t)))
+		;; The C way
+		(#\{
+		 (push 'progn ast)
+		 (funcall hstream :try-readers hanabi-whitespace-readers)
+		 (l
+		  (setf ret (funcall hstream :try-readers hanabi-expression-readers))
+		  (push (reader-status-ast ret) ast)
+		  while (reader-status-success ret)
+		  (setf ret (funcall hstream :try-readers hanabi-whitespace-readers))
+		  while (reader-status-success ret))
+		 (setf char (funcall hstream :next))
+		 (when (and (characterp char) (char= char #\}))
+		   (setf success t)))))
+	(make-reader-status :ast (nreverse ast)
+						:success success)))
+
+(defun hanabi-forth-reader (hstream)
+  (let (success
+		ast
+		ret
+		(args-left 0))
+	(funcall hstream :try-readers hanabi-whitespace-readers)
+	(setf ret (funcall hstream :try-readers '(hanabi-expression-reader
+											  hanabi-quote-reader
+											  hanabi-string-reader
+											  hanabi-integer-reader
+											  hanabi-symbol-reader)))
+	(when (reader-status-success ret)
+	  (when (symbolp (reader-status-ast ret))
+		(setq args-left (lassoc (reader-status-ast ret) hanabi-function-info)))
+	  (push (reader-status-ast ret) ast)
 	  (l
+	   while (and (not (null args-left)) (> args-left 0))
+	   (setf ret (funcall hstream :try-readers hanabi-whitespace-readers))
+	   while (reader-status-success ret)
 	   (setf ret (funcall hstream :try-readers hanabi-expression-readers))
 	   (push (reader-status-ast ret) ast)
 	   while (reader-status-success ret)
-	   (setf ret (funcall hstream :try-readers hanabi-whitespace-readers))
-	   while (reader-status-success ret))
-	  (setf char (funcall hstream :next))
-	  (when (and (characterp char) (char= char #\)))
+	   (decf args-left))
+	  (unless (> args-left 0)
 		(setf success t)))
 	(make-reader-status :ast (nreverse ast)
 						:success success)))
@@ -185,7 +236,6 @@
 
 (defun hanabi-symbol-reader (hstream)
   (let (char
-		success
 		(string (make-array 0
 							:element-type 'character
 							:fill-pointer 0
@@ -198,9 +248,8 @@
      (funcall hstream :next)
      (setf found-char t)
      (vector-push-extend char string))
-    (setf success found-char)
     (make-reader-status :ast (read-from-string (coerce string 'string))
-						:success success)))
+						:success found-char)))
 
 (defun hanabi-quote-reader (hstream)
   (let (char
