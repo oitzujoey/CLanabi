@@ -56,9 +56,10 @@
   ast
   success)
 
-(defvar hanabi-special-characters '(#\  #\( #\)))
+(defvar hanabi-special-characters '(#\( #\)))
 
 (defvar hanabi-expression-readers '(hanabi-expression-reader
+									hanabi-scope-reader
 									hanabi-quote-reader
 									hanabi-string-reader
 									hanabi-integer-reader
@@ -128,7 +129,7 @@
 						ret
 						(make-reader-status :ast nil :success nil))))
 				 (otherwise (error "hstream: Key absent or unrecognized")))))
-      (reader-status-ast (hstream :try-readers hanabi-expression-readers)))))
+      (print (reader-status-ast (hstream :try-readers hanabi-expression-readers))))))
 
 
 ;;; Hanabi readers ;;;
@@ -138,35 +139,58 @@
   (let (char
 		success
 		ret
+		wret
 		ast)
 	(setf char (funcall hstream :next))
-	(when (characterp char)
-	  (case char
-		;; The lisp way
-		(#\(
-		 (funcall hstream :try-readers hanabi-whitespace-readers)
-		 (l
-		  (setf ret (funcall hstream :try-readers hanabi-expression-readers))
-		  (push (reader-status-ast ret) ast)
-		  while (reader-status-success ret)
-		  (setf ret (funcall hstream :try-readers hanabi-whitespace-readers))
-		  while (reader-status-success ret))
-		 (setf char (funcall hstream :next))
-		 (when (and (characterp char) (char= char #\)))
-		   (setf success t)))
-		;; The C way
-		(#\{
-		 (push 'progn ast)
-		 (funcall hstream :try-readers hanabi-whitespace-readers)
-		 (l
-		  (setf ret (funcall hstream :try-readers hanabi-expression-readers))
-		  (push (reader-status-ast ret) ast)
-		  while (reader-status-success ret)
-		  (setf ret (funcall hstream :try-readers hanabi-whitespace-readers))
-		  while (reader-status-success ret))
-		 (setf char (funcall hstream :next))
-		 (when (and (characterp char) (char= char #\}))
-		   (setf success t)))))
+	(when (and (characterp char) (char= char #\())
+	  (funcall hstream :try-readers hanabi-whitespace-readers)
+	  (setf ret (funcall hstream :try-readers '(hanabi-expression-reader
+												hanabi-quote-reader
+												hanabi-string-reader
+												hanabi-integer-reader
+												hanabi-symbol-reader)))
+	  (push (reader-status-ast ret) ast)
+	  (when (reader-status-success ret)
+		(setf wret (funcall hstream :try-readers hanabi-whitespace-readers))
+		(when (reader-status-success wret)
+		  (l
+		   (setf ret (funcall hstream :try-readers hanabi-expression-readers))
+		   (push (reader-status-ast ret) ast)
+		   while (reader-status-success ret)
+		   (setf wret (funcall hstream :try-readers hanabi-whitespace-readers))
+		   while (reader-status-success wret)
+		   until (char= (funcall hstream :peek) #\)))))
+	  (setf char (funcall hstream :next))
+	  (when (and (characterp char) (char= char #\)))
+		(setf success t)))
+	(make-reader-status :ast (nreverse ast)
+						:success success)))
+
+(defun hanabi-scope-reader (hstream)
+  (let (char
+		success
+		ret
+		wret
+		ast)
+	(setf char (funcall hstream :next))
+	(when (and (characterp char) (char= char #\{))
+	  (push 'progn ast)
+	  (funcall hstream :try-readers hanabi-whitespace-readers)
+	  (setf ret (funcall hstream :try-readers hanabi-expression-readers))
+	  (push (reader-status-ast ret) ast)
+	  (when (reader-status-success ret)
+		(setf wret (funcall hstream :try-readers hanabi-whitespace-readers))
+		(when (reader-status-success wret)
+		  (l
+		   (setf ret (funcall hstream :try-readers hanabi-expression-readers))
+		   (push (reader-status-ast ret) ast)
+		   while (reader-status-success ret)
+		   (setf wret (funcall hstream :try-readers hanabi-whitespace-readers))
+		   while (reader-status-success wret)
+		   until (char= (funcall hstream :peek) #\}))))
+	  (setf char (funcall hstream :next))
+	  (when (and (characterp char) (char= char #\}))
+		(setf success t)))
 	(make-reader-status :ast (nreverse ast)
 						:success success)))
 
@@ -175,7 +199,6 @@
 		ast
 		ret
 		(args-left 0))
-	(funcall hstream :try-readers hanabi-whitespace-readers)
 	(setf ret (funcall hstream :try-readers '(hanabi-expression-reader
 											  hanabi-quote-reader
 											  hanabi-string-reader
@@ -210,7 +233,7 @@
 		(progn
 		  (l
 		   (setf char (funcall hstream :next))
-		   while (and (characterp char) (not (eq char #\")))
+		   while (and (characterp char) (not (char= char #\")))
 		   (vector-push-extend char string))
 		  (setf success (if (characterp char)
 							t
@@ -244,7 +267,8 @@
     (l
      (setf char (funcall hstream :peek))
      while (and (characterp char)
-				(not (member char hanabi-special-characters)))
+				(not (or (member char hanabi-special-characters)
+						 (whitespacep char))))
      (funcall hstream :next)
      (setf found-char t)
      (vector-push-extend char string))
@@ -268,7 +292,7 @@
   (let (char
 		found-comment)
     (setf char (funcall hstream :next))
-    (when (and (characterp char) (eq char #\/))
+    (when (and (characterp char) (member char hanabi-special-characters))
       (setf char (funcall hstream :next))
       (when (characterp char)
 		(case char
