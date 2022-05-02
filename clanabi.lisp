@@ -63,6 +63,7 @@
 										 hanabi-quote-reader
 										 hanabi-string-reader
 										 hanabi-integer-reader
+										 hanabi-callback-reader
 										 hanabi-symbol-reader))
 
 (defvar hanabi-expression-readers '(hanabi-expression-reader
@@ -70,6 +71,7 @@
 									hanabi-quote-reader
 									hanabi-string-reader
 									hanabi-integer-reader
+									hanabi-callback-reader
 									hanabi-forth-reader
 									hanabi-symbol-reader))
 
@@ -77,7 +79,7 @@
 
 (defvar hanabi-function-info '((print 1)
 							   (+     2)
-							   (list  0)))
+							   (list  2)))
 
 ;; This is the Common Lisp reader macro for Hanabi. Other reader readers will be used by it.
 ;; TODO: Macro should only return after a single form has been read.
@@ -216,25 +218,47 @@
 	(make-reader-status :ast (nreverse ast)
 						:success success)))
 
+(defun hanabi-callback-reader (hstream)
+  (let (char
+		(string (make-array 0
+							:element-type 'character
+							:fill-pointer 0
+							:adjustable t))
+		found-char
+		ast)
+	(setf char (funcall hstream :next))
+	(when (and (characterp char) (char= char #\#))
+	  (l
+	   (setf char (funcall hstream :peek))
+	   while (and (characterp char)
+				  (not (or (member char hanabi-special-characters)
+						   (whitespacep char))))
+	   (funcall hstream :next)
+	   (setf found-char t)
+	   (vector-push-extend char string))
+	  (setf ast (read-from-string (coerce string 'string))))
+    (make-reader-status :ast ast
+						:success found-char)))
+
 (defun hanabi-string-reader (hstream)
   (let (char
 		success
 		(string (make-array 0
 							:element-type 'character
 							:fill-pointer 0
-							:adjustable t)))
+							:adjustable t))
+		ast)
     (setf char (funcall hstream :next))
-    (if (and (characterp char) (eq char #\"))
-		(progn
-		  (l
-		   (setf char (funcall hstream :next))
-		   while (and (characterp char) (not (char= char #\")))
-		   (vector-push-extend char string))
-		  (setf success (if (characterp char)
-							t
-							nil)))
-		(setf success nil))
-    (make-reader-status :ast (coerce string 'string)
+    (when (and (characterp char) (char= char #\"))
+	  (l
+	   (setf char (funcall hstream :next))
+	   while (and (characterp char) (not (char= char #\")))
+	   (vector-push-extend char string))
+	  (setf ast (coerce string 'string))
+	  (setf success (if (characterp char)
+						t
+						nil)))
+    (make-reader-status :ast ast
 						:success success)))
 
 (defun hanabi-integer-reader (hstream)
