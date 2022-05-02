@@ -79,7 +79,13 @@
 
 (defvar hanabi-function-info '((print 1)
 							   (+     2)
-							   (list  2)))
+							   (list  2)
+							   (def   3)))
+
+(defmacro def (name args body)
+  `(progn
+	 (defun ,name ,args ,body)
+	 (setf hanabi-function-info (append (list (list ',name ,(length args))) hanabi-function-info))))
 
 ;; This is the Common Lisp reader macro for Hanabi. Other reader readers will be used by it.
 ;; TODO: Macro should only return after a single form has been read.
@@ -204,17 +210,18 @@
 	(when (reader-status-success ret)
 	  (when (symbolp (reader-status-ast ret))
 		(setq args-left (lassoc (reader-status-ast ret) hanabi-function-info)))
-	  (push (reader-status-ast ret) ast)
-	  (l
-	   while (and (not (null args-left)) (> args-left 0))
-	   (setf ret (funcall hstream :try-readers hanabi-whitespace-readers))
-	   while (reader-status-success ret)
-	   (setf ret (funcall hstream :try-readers hanabi-expression-readers))
-	   (push (reader-status-ast ret) ast)
-	   while (reader-status-success ret)
-	   (decf args-left))
-	  (unless (> args-left 0)
-		(setf success t)))
+	  (when (not (null args-left))
+		(push (reader-status-ast ret) ast)
+		(l
+		 while (and (not (null args-left)) (> args-left 0))
+		 (setf ret (funcall hstream :try-readers hanabi-whitespace-readers))
+		 while (reader-status-success ret)
+		 (setf ret (funcall hstream :try-readers hanabi-expression-readers))
+		 (push (reader-status-ast ret) ast)
+		 while (reader-status-success ret)
+		 (decf args-left))
+		(unless (> args-left 0)
+		  (setf success t))))
 	(make-reader-status :ast (nreverse ast)
 						:success success)))
 
