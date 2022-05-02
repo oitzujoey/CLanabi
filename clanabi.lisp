@@ -237,7 +237,7 @@
 	   (setf found-char t)
 	   (vector-push-extend char string))
 	  (setf ast (read-from-string (coerce string 'string))))
-    (make-reader-status :ast ast
+    (make-reader-status :ast `(function ,ast)
 						:success found-char)))
 
 (defun hanabi-string-reader (hstream)
