@@ -139,7 +139,7 @@
 						ret
 						(make-reader-status :ast nil :success nil))))
 				 (otherwise (error "hstream: Key absent or unrecognized")))))
-      (print (reader-status-ast (hstream :try-readers hanabi-expression-readers))))))
+      (reader-status-ast (hstream :try-readers hanabi-expression-readers)))))
 
 
 ;;; Hanabi readers ;;;
